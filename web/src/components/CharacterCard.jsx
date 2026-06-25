@@ -28,12 +28,21 @@ export default function CharacterCard({ character, onSelect }) {
           </div>
         )}
         <div className="absolute bottom-[22px] left-6">
-          <div
-            className="flex h-[78px] w-[78px] items-center justify-center rounded-full font-display text-[28px] font-bold text-direct"
-            style={{ background: 'linear-gradient(150deg,#1f5240,#0d2018)', border: '2px solid rgba(16,185,129,.55)', boxShadow: '0 0 30px rgba(16,185,129,.3)' }}
-          >
-            AH
-          </div>
+          {character.photo ? (
+            <img
+              src={character.photo}
+              alt={character.name}
+              className="h-[78px] w-[78px] rounded-full object-cover"
+              style={{ border: '2px solid rgba(16,185,129,.55)', boxShadow: '0 0 30px rgba(16,185,129,.3)' }}
+            />
+          ) : (
+            <div
+              className="flex h-[78px] w-[78px] items-center justify-center rounded-full font-display text-[28px] font-bold text-direct"
+              style={{ background: 'linear-gradient(150deg,#1f5240,#0d2018)', border: '2px solid rgba(16,185,129,.55)', boxShadow: '0 0 30px rgba(16,185,129,.3)' }}
+            >
+              AH
+            </div>
+          )}
         </div>
       </div>
 

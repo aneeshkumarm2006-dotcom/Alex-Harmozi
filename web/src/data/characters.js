@@ -13,7 +13,7 @@ export const characters = [
     words: '2.4M',
     accent: '#10B981',
     featured: true,
-    photo: null,
+    photo: '/alex.jpg',
     available: true,
   },
   {
