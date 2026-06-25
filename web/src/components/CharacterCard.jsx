@@ -10,14 +10,25 @@ export default function CharacterCard({ character, onSelect }) {
       onClick={() => onSelect(character)}
       className="group relative cursor-pointer overflow-hidden rounded-[18px] border border-[#2a2f24] bg-surface transition-[transform,border-color,box-shadow] duration-200 [@media(hover:hover)and(pointer:fine)]:hover:-translate-y-[3px] [@media(hover:hover)and(pointer:fine)]:hover:border-accent [@media(hover:hover)and(pointer:fine)]:hover:shadow-[0_18px_50px_rgba(0,0,0,.5),0_0_40px_rgba(16,185,129,.14)]"
     >
-      {/* banner */}
-      <div
-        className="relative h-[248px] overflow-hidden"
-        style={{ background: 'linear-gradient(160deg,#163a2c 0%,#0c1711 60%,#0a0d09 100%)' }}
-      >
-        <div className="absolute -bottom-[90px] -right-[30px] font-display text-[340px] font-bold leading-[0.8] tracking-[-0.04em] text-[rgba(16,185,129,.07)]">
-          AH
-        </div>
+      {/* banner -- full-bleed coach photo with a fade into the card body */}
+      <div className="relative h-[268px] overflow-hidden">
+        {character.photo ? (
+          <img
+            src={character.photo}
+            alt={character.name}
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ objectPosition: '50% 22%' }}
+          />
+        ) : (
+          <>
+            <div className="absolute inset-0" style={{ background: 'linear-gradient(160deg,#163a2c 0%,#0c1711 60%,#0a0d09 100%)' }} />
+            <div className="absolute -bottom-[90px] -right-[30px] font-display text-[340px] font-bold leading-[0.8] tracking-[-0.04em] text-[rgba(16,185,129,.07)]">
+              AH
+            </div>
+          </>
+        )}
+        {/* dark gradient so the title/body blend in and stay legible */}
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(10,13,9,0) 35%, rgba(10,13,9,0.55) 70%, #0a0d09 100%)' }} />
         {character.featured && (
           <div
             className="absolute left-6 top-6 flex items-center gap-[7px] rounded-full border px-3 py-1.5 text-[11.5px] font-semibold tracking-[0.04em] text-gold backdrop-blur-md"
@@ -27,23 +38,6 @@ export default function CharacterCard({ character, onSelect }) {
             FEATURED
           </div>
         )}
-        <div className="absolute bottom-[22px] left-6">
-          {character.photo ? (
-            <img
-              src={character.photo}
-              alt={character.name}
-              className="h-[78px] w-[78px] rounded-full object-cover"
-              style={{ border: '2px solid rgba(16,185,129,.55)', boxShadow: '0 0 30px rgba(16,185,129,.3)' }}
-            />
-          ) : (
-            <div
-              className="flex h-[78px] w-[78px] items-center justify-center rounded-full font-display text-[28px] font-bold text-direct"
-              style={{ background: 'linear-gradient(150deg,#1f5240,#0d2018)', border: '2px solid rgba(16,185,129,.55)', boxShadow: '0 0 30px rgba(16,185,129,.3)' }}
-            >
-              AH
-            </div>
-          )}
-        </div>
       </div>
 
       {/* body */}
