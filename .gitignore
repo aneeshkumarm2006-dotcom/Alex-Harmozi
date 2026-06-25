@@ -14,7 +14,8 @@ web/node_modules/
 web/dist/
 
 # --- large generated/derived data (regenerable; lives in Supabase) ---
-data/
+# leading slash = root only, so it does NOT match web/src/data/
+/data/
 
 # --- os / editor cruft ---
 .DS_Store
