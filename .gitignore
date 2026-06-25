@@ -1,0 +1,22 @@
+# --- secrets (NEVER commit) ---
+.env
+.env.*
+!.env.example
+cookies.txt
+
+# --- python ---
+.venv/
+__pycache__/
+*.pyc
+
+# --- node / frontend build ---
+web/node_modules/
+web/dist/
+
+# --- large generated/derived data (regenerable; lives in Supabase) ---
+data/
+
+# --- os / editor cruft ---
+.DS_Store
+*.bak
+*.bak.*

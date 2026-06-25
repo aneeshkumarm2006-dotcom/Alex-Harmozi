@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-press: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --accent-glow: rgba(16, 185, 129, 0.16);
+}
+
+@layer base {
+  html {
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    margin: 0;
+  }
+  /* Green focus ring everywhere -- never the default browser outline. */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  ::placeholder {
+    @apply text-faint;
+  }
+  ::selection {
+    background: rgba(16, 185, 129, 0.28);
+  }
+}
+
+@layer components {
+  /* Press feedback for any pressable element. */
+  .pressable {
+    transition: transform 220ms var(--ease-press);
+  }
+  .pressable:active {
+    transform: scale(0.97);
+    transition-duration: 120ms;
+  }
+
+  /* Fixed full-bleed film grain that kills the flatness of pure dark. */
+  .grain {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.045;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Typing indicator dots. */
+  .typing-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    @apply bg-direct;
+    animation: dotPulse 1.3s var(--ease-in-out) infinite;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.18s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.36s; }
+}
+
+/* ---- premium motion vocabulary (mirrors the design source) ---- */
+@keyframes msgIn   { from { opacity: 0; transform: translateY(8px); }  to { opacity: 1; transform: none; } }
+@keyframes srcIn   { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes screenIn{ from { opacity: 0; } to { opacity: 1; } }
+@keyframes badgeIn {
+  0%   { opacity: 0; transform: scale(0.85); }
+  60%  { transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+@keyframes dotPulse {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40%           { opacity: 1;    transform: translateY(-3px); }
+}
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,.45), 0 0 34px 2px rgba(16,185,129,.28); }
+  50%      { box-shadow: 0 0 0 4px rgba(16,185,129,.10), 0 0 46px 6px rgba(16,185,129,.34); }
+}
+
+.anim-badge  { animation: badgeIn .42s var(--ease-out) both; }
+.anim-src    { animation: srcIn .4s var(--ease-out) .12s both; }
+.anim-screen { animation: screenIn .4s var(--ease-out) both; }
+.glow-pulse  { animation: glowPulse 3.2s ease-in-out infinite; }
+
+/* Scrollbar polish (webkit) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: #26262B;
+  border-radius: 9999px;
+  border: 3px solid #0A0A0B;
+}
+::-webkit-scrollbar-thumb:hover { background: #34343b; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
+  }
+}

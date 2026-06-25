@@ -1,0 +1,13 @@
+# Ingestion (stages 1-3, already used by pull_videos.py)
+youtube-transcript-api
+google-api-python-client
+requests
+
+# Stage 4 -- chunk / embed / store / serve
+tiktoken            # accurate token counting for chunking (optional; falls back if absent)
+voyageai            # embeddings
+supabase            # pgvector store (Postgres)
+anthropic           # Claude generation
+fastapi             # web API
+uvicorn[standard]   # ASGI server
+python-dotenv       # load .env
