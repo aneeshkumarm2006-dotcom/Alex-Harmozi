@@ -44,3 +44,8 @@ create policy "own messages" on messages
   with check (exists (
     select 1 from conversations c
     where c.id = messages.conversation_id and c.user_id = auth.uid()));
+
+-- Table-level grants (RLS still restricts rows). This project doesn't auto-grant,
+-- so logged-in users (authenticated) + the backend (service_role) need these.
+grant all on table conversations to authenticated, service_role;
+grant all on table messages      to authenticated, service_role;

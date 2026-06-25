@@ -16,6 +16,7 @@ create table if not exists usage_log (
 create index if not exists usage_log_provider_idx on usage_log (provider, created_at);
 
 alter table usage_log enable row level security;  -- no policy => backend-only
+grant all on table usage_log to service_role;     -- project doesn't auto-grant
 
 -- Aggregated totals per provider (used by the /usage endpoint).
 create or replace function usage_totals()
@@ -37,6 +38,8 @@ as $$
   from usage_log
   group by provider;
 $$;
+
+grant execute on function usage_totals() to service_role;
 
 -- Seed the one-time corpus ingest (~5.22M Voyage tokens) so the dashboard
 -- reflects it. Idempotent: only inserts if not already present.
