@@ -1,0 +1,23 @@
+# Render blueprint for the FastAPI backend.
+# In Render: New + -> Blueprint -> pick this repo. Then fill the secret env vars.
+services:
+  - type: web
+    name: ask-alex-api
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: REQUIRE_AUTH
+        value: "true"
+      - key: SUPABASE_URL
+        sync: false        # set in dashboard (secret)
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

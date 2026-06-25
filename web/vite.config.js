@@ -11,13 +11,15 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, rootDir, '') // '' = load all names, no prefix filter
+  // Local dev reads the root .env; hosts (Vercel) inject via process.env.
+  const pick = (k) => env[k] || process.env[k] || ''
   return {
     plugins: [react()],
-    // Accept either VITE_-prefixed or plain names in the root .env.
+    // Accept either VITE_-prefixed or plain names, from .env or the host.
     define: {
-      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL || env.SUPABASE_URL || ''),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || ''),
-      'import.meta.env.VITE_API_URL': JSON.stringify(env.VITE_API_URL || ''),
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(pick('VITE_SUPABASE_URL') || pick('SUPABASE_URL')),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(pick('VITE_SUPABASE_ANON_KEY') || pick('SUPABASE_ANON_KEY')),
+      'import.meta.env.VITE_API_URL': JSON.stringify(pick('VITE_API_URL')),
     },
     server: {
       port: 5173,
