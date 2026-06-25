@@ -4,17 +4,29 @@ import { supabase } from './lib/supabase'
 import Login from './screens/Login'
 import Characters from './screens/Characters'
 import Chat from './screens/Chat'
+import { getCharacter } from './data/characters'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = still loading
-  const [character, setCharacter] = useState(null)
+  // Restore the last-open coach so a refresh stays on the chat, not the home screen.
+  const [character, setCharacterState] = useState(() => {
+    const c = getCharacter(localStorage.getItem('ask:characterId'))
+    return c && c.available ? c : null
+  })
   const reduce = useReducedMotion()
+
+  // Wrap the setter so the choice is persisted (and cleared on logout/back).
+  function setCharacter(c) {
+    setCharacterState(c)
+    if (c) localStorage.setItem('ask:characterId', c.id)
+    else localStorage.removeItem('ask:characterId')
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s)
-      if (!s) setCharacter(null) // logged out -> back to login
+      if (!s) setCharacter(null) // logged out -> clear coach + back to login
     })
     return () => sub.subscription.unsubscribe()
   }, [])
