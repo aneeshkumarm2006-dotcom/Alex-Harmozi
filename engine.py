@@ -114,10 +114,22 @@ def _build_context(rows):
     return "\n\n".join(blocks)
 
 
-def answer(question: str, history=None, top_k: int = None,
-           character: str = DEFAULT_CHARACTER) -> Answer:
-    """Full pipeline: retrieve -> tier -> generate. `history` is an optional list of
-    {role, content} dicts for multi-turn chat. `character` selects the persona."""
+def _log_claude(resp, tier):
+    """Best-effort Claude usage logging (never breaks the answer)."""
+    try:
+        import usage
+        u = getattr(resp, "usage", None)
+        usage.log("anthropic", config.ANTHROPIC_MODEL,
+                  input_tokens=getattr(u, "input_tokens", 0),
+                  output_tokens=getattr(u, "output_tokens", 0),
+                  note=tier)
+    except Exception:
+        pass
+
+
+def _prepare(question, history, top_k, character):
+    """Shared retrieve -> tier -> prompt build for both the sync and stream paths.
+    Returns (system, messages, tier, sources, top_sim)."""
     char = CHARACTERS.get(character) or CHARACTERS[DEFAULT_CHARACTER]
     rows = retrieve(question, top_k)
     top_sim = rows[0]["similarity"] if rows else 0.0
@@ -131,10 +143,24 @@ def answer(question: str, history=None, top_k: int = None,
     user_block = question
     if context:
         user_block = f"{question}\n\n---\nCONTEXT (numbered sources):\n{context}"
-
     messages = list(history or [])
     messages.append({"role": "user", "content": user_block})
 
+    sources = [
+        Source(
+            n=i, title=r["title"], deep_link=r["deep_link"], timestamp=r.get("ts", ""),
+            similarity=round(r["similarity"], 4), video_id=r["video_id"],
+            snippet=(r["content"][:160] + "...") if len(r["content"]) > 160 else r["content"],
+        )
+        for i, r in enumerate(context_rows, 1)
+    ]
+    return system, messages, tier, sources, round(top_sim, 4)
+
+
+def answer(question: str, history=None, top_k: int = None,
+           character: str = DEFAULT_CHARACTER) -> Answer:
+    """Full pipeline (blocking): retrieve -> tier -> generate the whole answer."""
+    system, messages, tier, sources, top_sim = _prepare(question, history, top_k, character)
     resp = config.anthropic_client().messages.create(
         model=config.ANTHROPIC_MODEL,
         max_tokens=config.GEN_MAX_TOKENS,
@@ -142,28 +168,33 @@ def answer(question: str, history=None, top_k: int = None,
         messages=messages,
     )
     text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    _log_claude(resp, tier)
+    return Answer(question, tier, text.strip(), top_sim, sources)
 
-    # Best-effort usage logging (never breaks the answer).
-    try:
-        import usage
-        u = getattr(resp, "usage", None)
-        usage.log("anthropic", config.ANTHROPIC_MODEL,
-                  input_tokens=getattr(u, "input_tokens", 0),
-                  output_tokens=getattr(u, "output_tokens", 0),
-                  note=tier)
-    except Exception:
-        pass
 
-    sources = [
-        Source(
-            n=i,
-            title=r["title"],
-            deep_link=r["deep_link"],
-            timestamp=r.get("ts", ""),
-            similarity=round(r["similarity"], 4),
-            video_id=r["video_id"],
-            snippet=(r["content"][:160] + "...") if len(r["content"]) > 160 else r["content"],
-        )
-        for i, r in enumerate(context_rows, 1)
-    ]
-    return Answer(question, tier, text.strip(), round(top_sim, 4), sources)
+def answer_stream(question: str, history=None, top_k: int = None,
+                  character: str = DEFAULT_CHARACTER):
+    """Streaming pipeline. Yields (kind, payload) tuples:
+      ("meta",  {tier, top_similarity, sources})  -- once, before any text
+      ("delta", "<text chunk>")                    -- many, as Claude writes
+      ("done",  {})                                -- once, at the end
+    """
+    system, messages, tier, sources, top_sim = _prepare(question, history, top_k, character)
+    yield ("meta", {
+        "tier": tier,
+        "top_similarity": top_sim,
+        "sources": [s.__dict__ for s in sources],
+    })
+    final = None
+    with config.anthropic_client().messages.stream(
+        model=config.ANTHROPIC_MODEL,
+        max_tokens=config.GEN_MAX_TOKENS,
+        system=system,
+        messages=messages,
+    ) as stream:
+        for chunk in stream.text_stream:
+            yield ("delta", chunk)
+        final = stream.get_final_message()
+    if final is not None:
+        _log_claude(final, tier)
+    yield ("done", {})

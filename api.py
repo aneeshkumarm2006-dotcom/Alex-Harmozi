@@ -13,12 +13,13 @@ Run (dev):
   # the Vite dev server (web/) proxies /chat here, so just open http://localhost:5173
 """
 
+import json
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -155,3 +156,26 @@ def chat(req: ChatRequest, user=Depends(require_user)):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"upstream error: {e}")
+
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest, user=Depends(require_user)):
+    """Server-Sent Events stream. Each line is `data: {"type","data"}` where type
+    is meta | delta | done | error. The frontend renders deltas as they arrive."""
+    if req.character not in engine.CHARACTERS:
+        raise HTTPException(status_code=400, detail=f"Unknown character: {req.character}")
+    history = [t.model_dump() for t in req.history] if req.history else None
+
+    def gen():
+        try:
+            for kind, payload in engine.answer_stream(
+                req.question, history=history, top_k=req.top_k, character=req.character
+            ):
+                yield f"data: {json.dumps({'type': kind, 'data': payload})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'data': {'detail': str(e)}})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",  # disable proxy buffering so tokens flush live
+    })

@@ -20,8 +20,11 @@ create table if not exists messages (
   content         text not null,
   tier            text,
   sources         jsonb,
+  feedback        smallint,   -- 1 = 👍, -1 = 👎, null = none
   created_at      timestamptz not null default now()
 );
+-- for tables that already existed before this column:
+alter table messages add column if not exists feedback smallint;
 create index if not exists messages_conv_idx
   on messages (conversation_id, created_at);
 

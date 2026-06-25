@@ -1,5 +1,30 @@
+import { useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+
+// Code block with a hover Copy button (reads its own rendered text).
+function CodeBlock({ children }) {
+  const ref = useRef(null)
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard?.writeText(ref.current?.innerText || '')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <div className="group relative my-3">
+      <button
+        onClick={copy}
+        className="absolute right-2 top-2 rounded-md border border-border bg-bg/70 px-2 py-1 text-[11px] text-faint opacity-0 backdrop-blur transition-opacity hover:text-text group-hover:opacity-100"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+      <pre ref={ref} className="overflow-x-auto rounded-md border border-border bg-surface p-3 text-[13px] leading-[1.5]">
+        {children}
+      </pre>
+    </div>
+  )
+}
 
 // Renders an assistant message as proper markdown (bold, lists, headings, code,
 // links, tables) styled for the dark theme -- like ChatGPT/Claude/Gemini do,
@@ -28,9 +53,7 @@ const components = {
     ) : (
       <code className="font-mono text-[13px]">{children}</code>
     ),
-  pre: ({ children }) => (
-    <pre className="my-3 overflow-x-auto rounded-md border border-border bg-surface p-3 text-[13px] leading-[1.5]">{children}</pre>
-  ),
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   hr: () => <hr className="my-4 border-border" />,
   table: ({ children }) => (
     <div className="my-3 overflow-x-auto"><table className="w-full border-collapse text-[14px]">{children}</table></div>

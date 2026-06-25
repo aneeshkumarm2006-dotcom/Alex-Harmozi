@@ -4,10 +4,11 @@ import { supabase } from '../lib/supabase'
 import Avatar from '../components/Avatar'
 import Sidebar from '../components/Sidebar'
 import Message from '../components/Message'
-import { ask } from '../lib/api'
+import { askStream } from '../lib/api'
 import {
   listConversations, getMessages, createConversation,
-  addMessage, touchConversation,
+  addMessage, touchConversation, deleteMessage, deleteMessagesFrom, setFeedback,
+  renameConversation, deleteConversation,
 } from '../lib/chats'
 
 const SUGGESTIONS = [
@@ -15,6 +16,13 @@ const SUGGESTIONS = [
   'How do I get leads without paying for ads?',
   'Should I raise my prices?',
   'What crypto should I buy?',
+]
+
+// Generic, useful follow-ups shown after a finished answer.
+const FOLLOWUPS = [
+  'Give me a concrete example',
+  'How do I apply this to my business?',
+  "What's the first step?",
 ]
 
 const titleFrom = (q) => {
@@ -38,6 +46,26 @@ export default function Chat({ character, user, onBack }) {
   const threadRef = useRef(null)
   const bottomRef = useRef(null)
   const taRef = useRef(null)
+  const abortRef = useRef(null) // AbortController for the Stop button
+  const stickRef = useRef(true) // follow the stream only while near the bottom
+
+  // Update the last message of a given role in a conversation.
+  function updateLastByRole(convId, role, updater) {
+    setConversations((cs) => cs.map((c) => {
+      if (c.id !== convId) return c
+      const msgs = c.messages.slice()
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === role) { msgs[i] = updater(msgs[i]); break }
+      }
+      return { ...c, messages: msgs }
+    }))
+  }
+  const updateLastAssistant = (id, fn) => updateLastByRole(id, 'assistant', fn)
+  const updateLastUser = (id, fn) => updateLastByRole(id, 'user', fn)
+
+  function stop() {
+    abortRef.current?.abort()
+  }
 
   const activeConv = conversations.find((c) => c.id === activeId) || conversations[0]
   const messages = activeConv?.messages || []
@@ -97,14 +125,24 @@ export default function Chat({ character, user, onBack }) {
   }
 
   const scrollToBottom = useCallback((behavior = 'smooth') => {
+    stickRef.current = true
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' })
     setShowJump(false)
   }, [])
 
-  // On new message / chat switch: auto-scroll if near the bottom.
+  // Track whether the user is near the bottom; if they scroll up, stop following
+  // the stream and reveal the "jump to latest" pill.
+  function handleScroll() {
+    const b = atBottom()
+    stickRef.current = b
+    setShowJump(!b)
+  }
+
+  // Follow the conversation only while pinned to the bottom (rAF waits for render).
   useEffect(() => {
-    if (atBottom()) scrollToBottom()
-    else setShowJump(true)
+    if (!stickRef.current) return
+    const id = requestAnimationFrame(() => scrollToBottom('auto'))
+    return () => cancelAnimationFrame(id)
   }, [messages, activeId, scrollToBottom])
 
   // Auto-grow the textarea up to ~120px.
@@ -115,15 +153,67 @@ export default function Chat({ character, user, onBack }) {
     ta.style.height = Math.min(ta.scrollHeight, 120) + 'px'
   }, [input])
 
+  // Stream an assistant reply into a conversation. Shared by send + regenerate.
+  async function streamAssistant(convId, question, history) {
+    setBusy(true)
+    patchConv(convId, (c) => ({ ...c, messages: [...c.messages, { role: 'assistant', pending: true }] }))
+
+    const dbId = String(convId).startsWith('local-') ? null : convId
+    const ac = new AbortController()
+    abortRef.current = ac
+    let acc = ''
+    let meta = null
+
+    const persist = async () => {
+      if (!dbId || !acc) return
+      try {
+        const row = await addMessage(dbId, { role: 'assistant', content: acc, tier: meta?.tier, sources: meta?.sources })
+        updateLastAssistant(convId, (m) => ({ ...m, mid: row.id }))
+        await touchConversation(dbId)
+      } catch (e) { console.error('Could not save the reply:', e.message) }
+    }
+
+    try {
+      await askStream({
+        question, history, character: character.id, signal: ac.signal,
+        onMeta: (d) => {
+          meta = d
+          updateLastAssistant(convId, (m) => ({
+            ...m, pending: false, streaming: true, tier: d.tier, sources: d.sources, content: '',
+          }))
+        },
+        onDelta: (chunk) => {
+          acc += chunk
+          updateLastAssistant(convId, (m) => ({ ...m, content: acc }))
+        },
+      })
+      updateLastAssistant(convId, (m) => ({ ...m, streaming: false }))
+      await persist()
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        updateLastAssistant(convId, (m) => ({ ...m, pending: false, streaming: false }))
+        await persist()
+      } else {
+        updateLastAssistant(convId, (m) => ({
+          ...m, pending: false, streaming: false,
+          tier: m.tier || 'out_of_scope',
+          content: acc || `Sorry — ${err.message}`,
+        }))
+      }
+    } finally {
+      setBusy(false)
+      abortRef.current = null
+    }
+  }
+
   async function send(text) {
     const question = (text ?? input).trim()
     if (!question || busy) return
     const targetId = activeId
     const conv = conversations.find((c) => c.id === targetId)
     setInput('')
-    setBusy(true)
+    stickRef.current = true // sending always jumps to the bottom
 
-    // History sent to the API: prior real turns in this conversation.
     const history = (conv?.messages || [])
       .filter((m) => !m.pending)
       .slice(-8)
@@ -134,37 +224,94 @@ export default function Chat({ character, user, onBack }) {
     patchConv(targetId, (c) => ({
       ...c,
       title: isFirst ? titleFrom(question) : c.title,
-      messages: [...c.messages, userMsg, { role: 'assistant', pending: true }],
+      messages: [...c.messages, userMsg],
     }))
 
     // Ensure the conversation row exists, then persist the user turn.
+    let convId = targetId
     let dbId = String(targetId).startsWith('local-') ? null : targetId
     try {
       if (!dbId) {
         dbId = await createConversation(user.id, character.id, titleFrom(question))
         setConversations((cs) => cs.map((c) => (c.id === targetId ? { ...c, id: dbId } : c)))
         setActiveId((a) => (a === targetId ? dbId : a))
+        convId = dbId
       }
-      await addMessage(dbId, userMsg)
+      const row = await addMessage(dbId, userMsg)
+      updateLastUser(convId, (m) => ({ ...m, mid: row.id, createdAt: row.created_at }))
     } catch (e) {
       console.error('Could not save your message:', e.message)
     }
 
-    const liveId = dbId || targetId
-    try {
-      const data = await ask({ question, history, character: character.id })
-      const asst = { role: 'assistant', content: data.answer, tier: data.tier, sources: data.sources }
-      patchConv(liveId, (c) => ({ ...c, messages: [...c.messages.slice(0, -1), asst] }))
-      if (dbId) {
-        try { await addMessage(dbId, asst); await touchConversation(dbId) }
-        catch (e) { console.error('Could not save the reply:', e.message) }
-      }
-    } catch (err) {
-      const asst = { role: 'assistant', content: `Sorry — ${err.message}`, tier: 'out_of_scope' }
-      patchConv(liveId, (c) => ({ ...c, messages: [...c.messages.slice(0, -1), asst] }))
-    } finally {
-      setBusy(false)
+    await streamAssistant(convId, question, history)
+  }
+
+  // Regenerate the last assistant reply from the same question.
+  async function regenerate() {
+    if (busy) return
+    const conv = conversations.find((c) => c.id === activeId)
+    if (!conv) return
+    const msgs = conv.messages
+    let ai = -1
+    for (let i = msgs.length - 1; i >= 0; i--) { if (msgs[i].role === 'assistant') { ai = i; break } }
+    if (ai < 1 || msgs[ai - 1].role !== 'user') return
+
+    const old = msgs[ai]
+    const question = msgs[ai - 1].content
+    if (old.mid) { try { await deleteMessage(old.mid) } catch (e) { console.error(e) } }
+    patchConv(activeId, (c) => ({ ...c, messages: c.messages.slice(0, ai) }))
+
+    const history = msgs.slice(0, ai - 1)
+      .filter((m) => !m.pending).slice(-8).map((m) => ({ role: m.role, content: m.content }))
+    await streamAssistant(activeId, question, history)
+  }
+
+  // Edit a user message and re-run the conversation from that point.
+  async function editAndResend(index, newText) {
+    if (busy || !newText.trim()) return
+    const conv = conversations.find((c) => c.id === activeId)
+    const target = conv?.messages[index]
+    if (!target || target.role !== 'user') return
+    const dbId = String(activeId).startsWith('local-') ? null : activeId
+    if (dbId && target.createdAt) {
+      try { await deleteMessagesFrom(dbId, target.createdAt) } catch (e) { console.error(e) }
     }
+    patchConv(activeId, (c) => ({ ...c, messages: c.messages.slice(0, index) }))
+    await send(newText)
+  }
+
+  async function handleFeedback(index, vote) {
+    const conv = conversations.find((c) => c.id === activeId)
+    const msg = conv?.messages[index]
+    if (!msg) return
+    const next = msg.feedback === vote ? null : vote
+    patchConv(activeId, (c) => ({
+      ...c, messages: c.messages.map((m, i) => (i === index ? { ...m, feedback: next } : m)),
+    }))
+    if (msg.mid) { try { await setFeedback(msg.mid, next) } catch (e) { console.error(e) } }
+  }
+
+  async function renameChat(id, title) {
+    patchConv(id, (c) => ({ ...c, title }))
+    if (!String(id).startsWith('local-')) {
+      try { await renameConversation(id, title) } catch (e) { console.error(e) }
+    }
+  }
+
+  async function deleteChat(id) {
+    if (!String(id).startsWith('local-')) {
+      try { await deleteConversation(id) } catch (e) { console.error(e) }
+    }
+    setConversations((cs) => {
+      const next = cs.filter((c) => c.id !== id)
+      if (next.length === 0) {
+        const fresh = { id: `local-${nextLocal.current++}`, title: 'New chat', messages: [], loaded: true }
+        setActiveId(fresh.id)
+        return [fresh]
+      }
+      if (id === activeId) setActiveId(next[0].id)
+      return next
+    })
   }
 
   function onKeyDown(e) {
@@ -186,6 +333,8 @@ export default function Chat({ character, user, onBack }) {
         onNewChat={newChat}
         onBack={onBack}
         onSignOut={() => supabase.auth.signOut()}
+        onRename={renameChat}
+        onDelete={deleteChat}
       />
 
       {/* main column */}
@@ -224,17 +373,44 @@ export default function Chat({ character, user, onBack }) {
         </header>
 
         {/* thread */}
-        <div ref={threadRef} className="relative flex-1 overflow-y-auto px-5 pb-7 pt-[34px]">
+        <div ref={threadRef} onScroll={handleScroll} className="relative flex-1 overflow-y-auto px-5 pb-7 pt-[34px]">
           <div className="mx-auto max-w-chat">
             {showEmpty ? (
               <EmptyState onPick={(q) => send(q)} />
             ) : (
               <div className="space-y-[26px]">
                 {messages.map((m, i) => (
-                  <Message key={i} msg={m} character={character} />
+                  <Message
+                    key={i}
+                    msg={m}
+                    character={character}
+                    isLast={i === messages.length - 1}
+                    busy={busy}
+                    onRegenerate={regenerate}
+                    onFeedback={(vote) => handleFeedback(i, vote)}
+                    onEdit={(newText) => editAndResend(i, newText)}
+                  />
                 ))}
               </div>
             )}
+
+            {/* follow-up suggestions after a finished answer */}
+            {!showEmpty && !busy && messages.length > 0 &&
+              messages[messages.length - 1].role === 'assistant' &&
+              !messages[messages.length - 1].streaming && (
+                <div className="mt-5 flex flex-wrap gap-2 pl-[49px]">
+                  {FOLLOWUPS.map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => send(f)}
+                      className="rounded-full border border-border bg-surface px-3.5 py-2 text-[13px] text-muted transition-[border-color,color,transform] hover:-translate-y-px hover:border-accent hover:text-text"
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              )}
+
             <div ref={bottomRef} />
           </div>
 
@@ -264,18 +440,31 @@ export default function Chat({ character, user, onBack }) {
                 placeholder="Ask about offers, leads, sales, scaling…"
                 className="max-h-[120px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-[22px] text-text outline-none"
               />
-              <button
-                type="button"
-                onClick={() => send()}
-                disabled={!input.trim() || busy}
-                aria-label="Send"
-                className="pressable flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] text-[#04130c] transition-transform duration-150 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ background: 'linear-gradient(150deg,#10B981,#0d9f6e)', boxShadow: '0 0 18px rgba(16,185,129,.3)' }}
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-              </button>
+              {busy ? (
+                <button
+                  type="button"
+                  onClick={stop}
+                  aria-label="Stop generating"
+                  className="pressable flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] border border-border bg-surface-2 text-text transition-transform duration-150 hover:-translate-y-px"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="5" y="5" width="14" height="14" rx="3" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => send()}
+                  disabled={!input.trim()}
+                  aria-label="Send"
+                  className="pressable flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] text-[#04130c] transition-transform duration-150 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{ background: 'linear-gradient(150deg,#10B981,#0d9f6e)', boxShadow: '0 0 18px rgba(16,185,129,.3)' }}
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                </button>
+              )}
             </div>
             <div className="mt-[9px] text-center text-[11.5px] text-[#4f544e]">
               Answers are grounded in real clips. Green means he said it · amber means inferred.
