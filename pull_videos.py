@@ -48,6 +48,13 @@ from youtube_transcript_api import (
     YouTubeTranscriptApiException,
 )
 
+# Load .env (if present) so the API key + proxy creds are picked up automatically.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:
+    pass
+
 # Won't change on retry -> mark done-with-no-transcript.
 PERMANENT_ERRORS = (TranscriptsDisabled, NoTranscriptFound, VideoUnavailable)
 # Worth retrying on a fresh IP: YouTube IP/blocks + any network/429 error from requests.
