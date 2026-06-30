@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 // Rotating status lines shown while the answer is still being retrieved (before
 // the first streamed token). Makes the wait feel intentional, like ChatGPT.
 const PHRASES = [
-  'Searching 527 videos…',
+  'Searching 1,900+ videos…',
   'Reading the transcripts…',
   'Matching his frameworks…',
   'Pulling the receipts…',
