@@ -30,11 +30,13 @@ import sys
 import config
 
 
-def load_chunks(limit=None):
-    if not config.CHUNKS_JSONL.exists():
-        sys.exit(f"{config.CHUNKS_JSONL} not found -- run `python chunk.py` first.")
+def load_chunks(limit=None, path=None):
+    from pathlib import Path
+    p = Path(path) if path else config.CHUNKS_JSONL
+    if not p.exists():
+        sys.exit(f"{p} not found -- run `python chunk.py` first.")
     rows = []
-    with open(config.CHUNKS_JSONL, encoding="utf-8") as fh:
+    with open(p, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if line:
@@ -85,10 +87,11 @@ def main():
     ap.add_argument("--limit", type=int, default=None, help="only process first N chunks")
     ap.add_argument("--reembed", action="store_true", help="re-embed even if already loaded")
     ap.add_argument("--batch", type=int, default=config.VOYAGE_BATCH)
+    ap.add_argument("--chunks", default=None, help="path to a chunks.jsonl (default: data/chunks.jsonl)")
     args = ap.parse_args()
 
-    chunks = load_chunks(args.limit)
-    print(f"Loaded {len(chunks)} chunks from {config.CHUNKS_JSONL.name}.")
+    chunks = load_chunks(args.limit, path=args.chunks)
+    print(f"Loaded {len(chunks)} chunks from {args.chunks or config.CHUNKS_JSONL.name}.")
 
     sb = config.supabase_client()
     if not args.reembed:

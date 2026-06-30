@@ -110,15 +110,26 @@ def chunk_snippets(snippets, meta, max_tokens, overlap_tokens):
 
 
 def main():
+    from pathlib import Path
     ap = argparse.ArgumentParser(description="Chunk transcripts into retrieval units.")
     ap.add_argument("--max", type=int, default=None, help="limit number of videos (testing)")
     ap.add_argument("--max-tokens", type=int, default=config.MAX_CHUNK_TOKENS)
     ap.add_argument("--overlap", type=int, default=config.OVERLAP_TOKENS)
+    ap.add_argument("--data-dir", default=None,
+                    help="folder holding manifest.json/videos.json/transcripts/ (default: data/)")
     ap.add_argument("--out", default=str(config.CHUNKS_JSONL))
     args = ap.parse_args()
 
-    manifest = json.loads(config.MANIFEST_JSON.read_text())
-    videos = {v["video_id"]: v for v in json.loads(config.VIDEOS_JSON.read_text())}
+    # Resolve input paths -- default to the main data/ dir, or a custom --data-dir
+    # (e.g. data_moremozi) so a second channel can be chunked without clobbering.
+    if args.data_dir:
+        ddir = Path(args.data_dir)
+        manifest_path, videos_path, tdir = ddir / "manifest.json", ddir / "videos.json", ddir / "transcripts"
+    else:
+        manifest_path, videos_path, tdir = config.MANIFEST_JSON, config.VIDEOS_JSON, config.TRANSCRIPTS_DIR
+
+    manifest = json.loads(manifest_path.read_text())
+    videos = {v["video_id"]: v for v in json.loads(videos_path.read_text())}
 
     ok_ids = [vid for vid, m in manifest.items() if m.get("status") == "ok"]
     if args.max:
@@ -129,7 +140,7 @@ def main():
     total_chunks = 0
     with open(args.out, "w", encoding="utf-8") as fh:
         for i, vid in enumerate(ok_ids, 1):
-            tpath = config.TRANSCRIPTS_DIR / f"{vid}.json"
+            tpath = tdir / f"{vid}.json"
             if not tpath.exists():
                 print(f"  ! {vid}: transcript file missing, skipping")
                 continue
