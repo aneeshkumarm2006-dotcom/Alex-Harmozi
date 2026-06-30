@@ -75,8 +75,9 @@ def upsert_resilient(sb, rows, sub=25, retries=5):
                 sb.table("chunks").upsert(part).execute()
                 break
             except Exception as e:
-                msg = str(e)
-                transient = "57014" in msg or "timeout" in msg.lower()
+                msg = str(e).lower()
+                transient = ("57014" in msg or "timeout" in msg or "timed out" in msg
+                             or "read operation" in msg or "connection" in msg)
                 if not transient or attempt == retries:
                     raise
                 time.sleep(min(2 * attempt, 10))
