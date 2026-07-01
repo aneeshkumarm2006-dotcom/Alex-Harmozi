@@ -114,19 +114,6 @@ def _build_context(rows):
     return "\n\n".join(blocks)
 
 
-def _log_claude(resp, tier):
-    """Best-effort Claude usage logging (never breaks the answer)."""
-    try:
-        import usage
-        u = getattr(resp, "usage", None)
-        usage.log("anthropic", config.ANTHROPIC_MODEL,
-                  input_tokens=getattr(u, "input_tokens", 0),
-                  output_tokens=getattr(u, "output_tokens", 0),
-                  note=tier)
-    except Exception:
-        pass
-
-
 def _prepare(question, history, top_k, character):
     """Shared retrieve -> tier -> prompt build for both the sync and stream paths.
     Returns (system, messages, tier, sources, top_sim)."""
@@ -161,14 +148,7 @@ def answer(question: str, history=None, top_k: int = None,
            character: str = DEFAULT_CHARACTER) -> Answer:
     """Full pipeline (blocking): retrieve -> tier -> generate the whole answer."""
     system, messages, tier, sources, top_sim = _prepare(question, history, top_k, character)
-    resp = config.anthropic_client().messages.create(
-        model=config.ANTHROPIC_MODEL,
-        max_tokens=config.GEN_MAX_TOKENS,
-        system=system,
-        messages=messages,
-    )
-    text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-    _log_claude(resp, tier)
+    text = config.generate(system, messages, config.GEN_MAX_TOKENS, note=tier)
     return Answer(question, tier, text.strip(), top_sim, sources)
 
 
@@ -185,16 +165,6 @@ def answer_stream(question: str, history=None, top_k: int = None,
         "top_similarity": top_sim,
         "sources": [s.__dict__ for s in sources],
     })
-    final = None
-    with config.anthropic_client().messages.stream(
-        model=config.ANTHROPIC_MODEL,
-        max_tokens=config.GEN_MAX_TOKENS,
-        system=system,
-        messages=messages,
-    ) as stream:
-        for chunk in stream.text_stream:
-            yield ("delta", chunk)
-        final = stream.get_final_message()
-    if final is not None:
-        _log_claude(final, tier)
+    for chunk in config.generate_stream(system, messages, config.GEN_MAX_TOKENS, note=tier):
+        yield ("delta", chunk)
     yield ("done", {})

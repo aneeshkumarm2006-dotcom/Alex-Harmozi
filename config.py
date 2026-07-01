@@ -39,10 +39,15 @@ VOYAGE_MODEL = os.environ.get("VOYAGE_MODEL", "voyage-3")
 EMBED_DIM = int(os.environ.get("EMBED_DIM", "1024"))
 VOYAGE_BATCH = int(os.environ.get("VOYAGE_BATCH", "128"))  # Voyage caps at 128 texts/request
 
-# ----------------------------- generation (Claude) -----------------------------
+# ----------------------------- generation (Claude / Gemini) -----------------------------
 
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEN_MAX_TOKENS = int(os.environ.get("GEN_MAX_TOKENS", "1024"))
+# Which LLM writes answers/extracts. Defaults to gemini if a Gemini key is set.
+GENERATION_PROVIDER = (os.environ.get("GENERATION_PROVIDER")
+                       or ("gemini" if os.environ.get("GEMINI_API_KEY") else "anthropic")).lower()
+ACTIVE_MODEL = GEMINI_MODEL if GENERATION_PROVIDER == "gemini" else ANTHROPIC_MODEL
 
 # ----------------------------- retrieval + tiering -----------------------------
 
@@ -110,3 +115,99 @@ def _log_voyage(res, note):
         usage.log("voyage", VOYAGE_MODEL, total_tokens=getattr(res, "total_tokens", 0), note=note)
     except Exception:
         pass
+
+
+# ----------------------------- generation (provider-agnostic) -----------------------------
+
+
+def _log_gen(input_tokens, output_tokens, note=None):
+    try:
+        import usage
+        prov = "gemini" if GENERATION_PROVIDER == "gemini" else "anthropic"
+        usage.log(prov, ACTIVE_MODEL, input_tokens=input_tokens, output_tokens=output_tokens, note=note)
+    except Exception:
+        pass
+
+
+def _gemini_contents(messages):
+    # Gemini uses roles "user"/"model" and a separate system_instruction.
+    return [{"role": "model" if m["role"] == "assistant" else "user",
+             "parts": [{"text": m["content"]}]} for m in messages]
+
+
+def _gemini_url(stream):
+    verb = "streamGenerateContent?alt=sse&" if stream else "generateContent?"
+    return (f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{GEMINI_MODEL}:{verb}key={_require('GEMINI_API_KEY')}")
+
+
+def generate(system, messages, max_tokens=None, note=None):
+    """Blocking generation. Returns the answer text. Dispatches by provider."""
+    max_tokens = max_tokens or GEN_MAX_TOKENS
+    if GENERATION_PROVIDER == "gemini":
+        import requests
+        body = {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": _gemini_contents(messages),
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        }
+        r = requests.post(_gemini_url(False), json=body, timeout=180)
+        r.raise_for_status()
+        d = r.json()
+        parts = d.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts)
+        um = d.get("usageMetadata", {})
+        _log_gen(um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0), note)
+        return text
+    resp = anthropic_client().messages.create(
+        model=ANTHROPIC_MODEL, max_tokens=max_tokens, system=system, messages=messages)
+    text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    u = getattr(resp, "usage", None)
+    _log_gen(getattr(u, "input_tokens", 0), getattr(u, "output_tokens", 0), note)
+    return text
+
+
+def generate_stream(system, messages, max_tokens=None, note=None):
+    """Streaming generation. Yields text chunks. Dispatches by provider."""
+    max_tokens = max_tokens or GEN_MAX_TOKENS
+    if GENERATION_PROVIDER == "gemini":
+        import json as _json
+        import requests
+        body = {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": _gemini_contents(messages),
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        }
+        pin = pout = 0
+        with requests.post(_gemini_url(True), json=body, stream=True, timeout=180) as r:
+            r.raise_for_status()
+            for raw in r.iter_lines():
+                if not raw:
+                    continue
+                line = raw.decode("utf-8")
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if not payload:
+                    continue
+                try:
+                    d = _json.loads(payload)
+                except Exception:
+                    continue
+                for cand in d.get("candidates", []):
+                    for p in cand.get("content", {}).get("parts", []):
+                        if p.get("text"):
+                            yield p["text"]
+                um = d.get("usageMetadata")
+                if um:
+                    pin = um.get("promptTokenCount", pin)
+                    pout = um.get("candidatesTokenCount", pout)
+        _log_gen(pin, pout, note)
+        return
+    with anthropic_client().messages.stream(
+        model=ANTHROPIC_MODEL, max_tokens=max_tokens, system=system, messages=messages) as stream:
+        for chunk in stream.text_stream:
+            yield chunk
+        final = stream.get_final_message()
+    u = getattr(final, "usage", None)
+    _log_gen(getattr(u, "input_tokens", 0), getattr(u, "output_tokens", 0), note)

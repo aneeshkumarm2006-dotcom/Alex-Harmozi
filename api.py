@@ -89,7 +89,8 @@ def root():
 def health():
     return {
         "status": "ok",
-        "model": config.ANTHROPIC_MODEL,
+        "provider": config.GENERATION_PROVIDER,
+        "model": config.ACTIVE_MODEL,
         "embed_model": config.VOYAGE_MODEL,
         "top_k": config.TOP_K,
         "require_auth": config.REQUIRE_AUTH,
