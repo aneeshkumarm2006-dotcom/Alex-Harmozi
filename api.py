@@ -14,6 +14,7 @@ Run (dev):
 """
 
 import json
+import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -142,6 +143,46 @@ def usage(user=Depends(require_user)):
         "model": config.ANTHROPIC_MODEL,
     }
     return {"voyage": voyage, "claude": claude}
+
+
+# ----------------------------- owner-only: business cases -----------------------------
+
+OWNER_EMAIL = os.environ.get("OWNER_EMAIL", "").lower()
+
+
+def require_owner(user):
+    """Gate to the owner account (by email). No-op when auth is disabled (local)."""
+    if not config.REQUIRE_AUTH:
+        return
+    email = (getattr(user, "email", "") or "").lower() if user else ""
+    if OWNER_EMAIL and email != OWNER_EMAIL:
+        raise HTTPException(status_code=403, detail="Owner only.")
+
+
+@app.get("/business-cases")
+def business_cases(q: str = "", niche: str = "", limit: int = 50, offset: int = 0,
+                   user=Depends(require_user)):
+    require_owner(user)
+    sb = config.supabase_client()
+    query = sb.table("business_cases").select("*", count="exact")
+    if niche:
+        query = query.ilike("niche", f"%{niche}%")
+    if q:
+        query = query.or_(
+            f"business.ilike.%{q}%,situation.ilike.%{q}%,advice.ilike.%{q}%,niche.ilike.%{q}%")
+    query = query.order("id").range(offset, offset + max(1, limit) - 1)
+    resp = query.execute()
+    return {"total": getattr(resp, "count", None), "cases": resp.data or []}
+
+
+@app.get("/business-cases/facets")
+def business_facets(user=Depends(require_user)):
+    require_owner(user)
+    try:
+        rows = config.supabase_client().rpc("business_niche_counts").execute().data or []
+    except Exception:
+        rows = []
+    return {"niches": rows}
 
 
 @app.post("/chat")

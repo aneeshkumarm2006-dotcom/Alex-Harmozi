@@ -5,7 +5,7 @@ import UsagePanel from '../components/UsagePanel'
 
 // Coach select. Grid is data-driven from data/characters.js. The featured coach
 // (Alex) is a rich card; unavailable entries render as dashed "coming soon" tiles.
-export default function Characters({ user, onSelect }) {
+export default function Characters({ user, onSelect, isOwner, onOpenCases }) {
   return (
     <div className="relative min-h-screen px-6 pb-20 pt-10">
       <div
@@ -26,6 +26,15 @@ export default function Characters({ user, onSelect }) {
             <span className="font-display text-[13px] font-semibold tracking-[0.32em]">ASK&nbsp;ALEX</span>
           </div>
           <div className="flex items-center gap-4">
+            {isOwner && (
+              <button
+                type="button"
+                onClick={onOpenCases}
+                className="pressable rounded-full border border-border px-3.5 py-1.5 text-[13.5px] font-medium text-gold transition-colors hover:border-border-strong"
+              >
+                Business cases
+              </button>
+            )}
             <span className="hidden text-[13px] text-muted sm:inline">{user?.email}</span>
             <button
               type="button"

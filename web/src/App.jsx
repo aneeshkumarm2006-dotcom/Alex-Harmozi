@@ -4,7 +4,10 @@ import { supabase } from './lib/supabase'
 import Login from './screens/Login'
 import Characters from './screens/Characters'
 import Chat from './screens/Chat'
+import BusinessCases from './screens/BusinessCases'
 import { getCharacter } from './data/characters'
+
+const OWNER_EMAIL = (import.meta.env.VITE_OWNER_EMAIL || '').toLowerCase()
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = still loading
@@ -13,7 +16,9 @@ export default function App() {
     const c = getCharacter(localStorage.getItem('ask:characterId'))
     return c && c.available ? c : null
   })
+  const [showCases, setShowCases] = useState(false)
   const reduce = useReducedMotion()
+  const isOwner = !!session && (session.user?.email || '').toLowerCase() === OWNER_EMAIL
 
   // Wrap the setter so the choice is persisted (and cleared on logout/back).
   function setCharacter(c) {
@@ -39,9 +44,19 @@ export default function App() {
   } else if (!session) {
     key = 'login'
     screen = <Login />
+  } else if (showCases && isOwner) {
+    key = 'cases'
+    screen = <BusinessCases onBack={() => setShowCases(false)} />
   } else if (!character) {
     key = 'characters'
-    screen = <Characters user={session.user} onSelect={setCharacter} />
+    screen = (
+      <Characters
+        user={session.user}
+        onSelect={setCharacter}
+        isOwner={isOwner}
+        onOpenCases={() => setShowCases(true)}
+      />
+    )
   } else {
     key = `chat:${character.id}`
     screen = <Chat character={character} user={session.user} onBack={() => setCharacter(null)} />

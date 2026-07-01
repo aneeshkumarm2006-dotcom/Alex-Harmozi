@@ -80,6 +80,30 @@ export async function askStream({ question, history = [], character = 'alex', si
   }
 }
 
+async function authedGet(path) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  })
+  if (!res.ok) {
+    let detail = res.statusText
+    try { detail = (await res.json()).detail || detail } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
+/** Owner-only: browse extracted business cases. */
+export function getBusinessCases({ q = '', niche = '', limit = 50, offset = 0 } = {}) {
+  const p = new URLSearchParams({ q, niche, limit: String(limit), offset: String(offset) })
+  return authedGet(`/business-cases?${p.toString()}`)
+}
+
+export function getBusinessFacets() {
+  return authedGet('/business-cases/facets')
+}
+
 /** Token usage + estimated cost for Voyage and Claude. */
 export async function getUsage() {
   const { data: { session } } = await supabase.auth.getSession()
