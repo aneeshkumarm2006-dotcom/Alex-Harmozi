@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { getBusinessCases, getBusinessFacets } from '../lib/api'
 
-// Owner-only: browse every real business Alex advised in his videos, with his
-// advice and a deep link to the exact clip. Search + filter by niche.
-const PAGE = 50
+// Owner-only: browse every real business Alex advised, with his advice and a deep
+// link to the exact clip. Search + filter by niche + infinite scroll.
+const PAGE = 100
 
 export default function BusinessCases({ onBack }) {
   const [q, setQ] = useState('')
@@ -11,33 +11,46 @@ export default function BusinessCases({ onBack }) {
   const [facets, setFacets] = useState([])
   const [cases, setCases] = useState([])
   const [total, setTotal] = useState(0)
-  const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const loadingRef = useRef(false)
 
   useEffect(() => { getBusinessFacets().then((d) => setFacets(d.niches || [])).catch(() => {}) }, [])
 
-  const load = useCallback(async (reset) => {
+  // Load a page. reset=true starts over (new search/filter).
+  const loadPage = useCallback(async (reset) => {
+    if (loadingRef.current) return
+    loadingRef.current = true
     setLoading(true); setErr('')
-    const off = reset ? 0 : offset
     try {
+      const off = reset ? 0 : cases.length
       const d = await getBusinessCases({ q, niche, limit: PAGE, offset: off })
       setTotal(d.total ?? 0)
-      setCases(reset ? d.cases : (c) => [...c, ...d.cases])
-      setOffset(off + (d.cases?.length || 0))
-    } catch (e) { setErr(e.message) } finally { setLoading(false) }
-  }, [q, niche, offset])
+      setCases(reset ? d.cases : (prev) => [...prev, ...d.cases])
+    } catch (e) { setErr(e.message) } finally {
+      setLoading(false); loadingRef.current = false
+    }
+  }, [q, niche, cases.length])
 
-  // Reload from the top whenever the query or niche changes (debounced for search).
+  // Reset + first page whenever the search/filter changes (debounced).
   useEffect(() => {
-    const t = setTimeout(() => { setOffset(0); load(true) }, 250)
+    const t = setTimeout(() => { setCases([]); loadPage(true) }, 250)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, niche])
 
+  // Infinite scroll: load the next page as you near the bottom.
+  useEffect(() => {
+    function onScroll() {
+      if (loadingRef.current || (total && cases.length >= total)) return
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 700) loadPage(false)
+    }
+    window.addEventListener('scroll', onScroll)
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [loadPage, total, cases.length])
+
   return (
     <div className="min-h-screen">
-      {/* header */}
       <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border-green bg-bg/80 px-6 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <button onClick={onBack} aria-label="Back"
@@ -46,14 +59,15 @@ export default function BusinessCases({ onBack }) {
           </button>
           <div>
             <div className="font-display text-[16px] font-semibold">Business cases</div>
-            <div className="text-[12px] text-muted">{total.toLocaleString()} real businesses Alex advised</div>
+            <div className="text-[12px] text-muted">
+              showing {cases.length.toLocaleString()} of {total.toLocaleString()} businesses Alex advised
+            </div>
           </div>
         </div>
         <span className="rounded-full border border-border px-3 py-1 text-[11px] uppercase tracking-[0.08em] text-gold">Owner</span>
       </header>
 
       <main className="mx-auto max-w-[900px] px-6 py-7">
-        {/* search */}
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -61,7 +75,6 @@ export default function BusinessCases({ onBack }) {
           className="mb-4 h-11 w-full rounded-[12px] border border-border bg-surface px-4 text-[15px] text-text outline-none focus:border-accent"
         />
 
-        {/* niche chips */}
         <div className="mb-6 flex flex-wrap gap-2">
           <Chip active={!niche} onClick={() => setNiche('')} label="All" />
           {facets.slice(0, 16).map((f) => (
@@ -72,7 +85,6 @@ export default function BusinessCases({ onBack }) {
 
         {err && <div className="mb-4 text-[13px] text-danger">Error: {err}</div>}
 
-        {/* cases */}
         <div className="flex flex-col gap-3">
           {cases.map((c) => (
             <div key={c.id} className="rounded-[14px] border border-border bg-surface p-4">
@@ -94,11 +106,8 @@ export default function BusinessCases({ onBack }) {
         </div>
 
         {loading && <div className="py-6 text-center text-[13px] text-muted">Loading…</div>}
-        {!loading && cases.length < total && (
-          <button onClick={() => load(false)}
-            className="pressable mx-auto mt-6 block rounded-full border border-border bg-surface px-5 py-2.5 text-[13.5px] text-muted hover:border-border-strong hover:text-text">
-            Load more ({total - cases.length} left)
-          </button>
+        {!loading && total > 0 && cases.length >= total && (
+          <div className="py-6 text-center text-[13px] text-faint">That's all {total.toLocaleString()} — end of list.</div>
         )}
         {!loading && cases.length === 0 && <div className="py-10 text-center text-[14px] text-muted">No cases found.</div>}
       </main>

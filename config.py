@@ -145,6 +145,7 @@ def generate(system, messages, max_tokens=None, note=None):
     """Blocking generation. Returns the answer text. Dispatches by provider."""
     max_tokens = max_tokens or GEN_MAX_TOKENS
     if GENERATION_PROVIDER == "gemini":
+        import time
         import requests
         body = {
             "system_instruction": {"parts": [{"text": system}]},
@@ -152,14 +153,25 @@ def generate(system, messages, max_tokens=None, note=None):
             "generationConfig": {"maxOutputTokens": max_tokens,
                                  "thinkingConfig": {"thinkingBudget": 0}},
         }
-        r = requests.post(_gemini_url(False), json=body, timeout=180)
-        r.raise_for_status()
-        d = r.json()
-        parts = d.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        text = "".join(p.get("text", "") for p in parts)
-        um = d.get("usageMetadata", {})
-        _log_gen(um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0), note)
-        return text
+        last = None
+        for attempt in range(4):
+            try:
+                r = requests.post(_gemini_url(False), json=body, timeout=180)
+                if r.status_code in (429, 500, 503) and attempt < 3:
+                    time.sleep(2 * (attempt + 1)); continue
+                r.raise_for_status()
+                d = r.json()
+                parts = d.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                text = "".join(p.get("text", "") for p in parts)
+                um = d.get("usageMetadata", {})
+                _log_gen(um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0), note)
+                return text
+            except requests.RequestException as e:
+                last = e
+                if attempt < 3:
+                    time.sleep(2 * (attempt + 1)); continue
+                raise
+        raise last or RuntimeError("Gemini generation failed")
     resp = anthropic_client().messages.create(
         model=ANTHROPIC_MODEL, max_tokens=max_tokens, system=system, messages=messages)
     text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
@@ -172,6 +184,7 @@ def generate_stream(system, messages, max_tokens=None, note=None):
     """Streaming generation. Yields text chunks. Dispatches by provider."""
     max_tokens = max_tokens or GEN_MAX_TOKENS
     if GENERATION_PROVIDER == "gemini":
+        import time
         import json as _json
         import requests
         body = {
@@ -180,9 +193,16 @@ def generate_stream(system, messages, max_tokens=None, note=None):
             "generationConfig": {"maxOutputTokens": max_tokens,
                                  "thinkingConfig": {"thinkingBudget": 0}},
         }
-        pin = pout = 0
-        with requests.post(_gemini_url(True), json=body, stream=True, timeout=180) as r:
+        # Retry transient errors on connect (before any tokens are yielded).
+        r = None
+        for attempt in range(4):
+            r = requests.post(_gemini_url(True), json=body, stream=True, timeout=180)
+            if r.status_code in (429, 500, 503) and attempt < 3:
+                r.close(); time.sleep(2 * (attempt + 1)); continue
+            break
+        with r:
             r.raise_for_status()
+            pin = pout = 0
             for raw in r.iter_lines():
                 if not raw:
                     continue

@@ -118,6 +118,43 @@ def _match(rpc, q_emb, k):
         return []  # RPC/table may not exist yet
 
 
+# Map query wording -> a normalized business-case category (see normalize_niches.py).
+CATEGORY_MATCH = [
+    (("gym", "fitness"), "Fitness & Gyms"),
+    (("agency", "agencies"), "Agencies"),
+    (("saas", "software"), "SaaS & Software"),
+    (("ecommerce", "e-commerce", "commerce", "retail", "subscription", "store",
+      "apparel", "fashion", "dtc"), "E-commerce & Retail"),
+    (("coach", "course", "education", "academy", "consult", "mastermind", "info product"), "Coaching & Education"),
+    (("real estate", "realtor", "property", "mortgage"), "Real Estate"),
+    (("medical", "dental", "health", "clinic", "chiro", "therapy", "wellness", "doctor"), "Health & Medical"),
+    (("hvac", "plumb", "roof", "cleaning", "contractor", "home service", "trade", "landscap"), "Home & Trade Services"),
+    (("restaurant", "food", "hospitality", "salon", "spa", "beauty"), "Local & Hospitality"),
+    (("marketing", "advertis", "seo", "ppc", "lead gen"), "Marketing"),
+    (("finance", "accounting", "insurance", "loan", "invest"), "Finance"),
+    (("supplement", "cpg"), "Supplements & CPG"),
+]
+
+
+def _detect_category(question):
+    s = question.lower()
+    for keys, label in CATEGORY_MATCH:
+        if any(k in s for k in keys):
+            return label
+    return None
+
+
+def _cases_by_category(label, k):
+    if not label:
+        return []
+    try:
+        return config.supabase_client().table("business_cases").select(
+            "id,video_id,title,deep_link,timestamp,business,niche,situation,advice"
+        ).ilike("niche", f"%{label}%").limit(k).execute().data or []
+    except Exception:
+        return []
+
+
 def _snip(text):
     return (text[:160] + "...") if text and len(text) > 160 else (text or "")
 
@@ -131,11 +168,21 @@ def _prepare(question, history, top_k, character):
 
     chunk_rows = _match("match_chunks", q_emb, top_k)
     # Cases use a lower floor than chunks (listing/meta phrasings score lower).
-    case_rows = [c for c in _match("match_business_cases", q_emb, 20)
+    vec_cases = [c for c in _match("match_business_cases", q_emb, 20)
                  if c.get("similarity", 0) >= CASE_FLOOR]
+    # If the question names a category, also pull that whole bucket for coverage
+    # (so "list the SaaS ones" gets real SaaS cases, not just vector guesses).
+    category = _detect_category(question)
+    cat_cases = _cases_by_category(category, 30)
+    seen, case_rows = set(), []
+    for c in cat_cases + vec_cases:           # category first for coverage
+        if c["id"] in seen:
+            continue
+        seen.add(c["id"]); case_rows.append(c)
+    case_rows = case_rows[:30]
 
     chunk_top = chunk_rows[0]["similarity"] if chunk_rows else 0.0
-    case_top = case_rows[0]["similarity"] if case_rows else 0.0
+    case_top = max((c.get("similarity") or 0) for c in case_rows) if case_rows else 0.0
     top_sim = max(chunk_top, case_top)
     tier = classify(top_sim)
     # Relevant cases make it answerable even if the transcripts didn't match.
@@ -158,9 +205,11 @@ def _prepare(question, history, top_k, character):
                 f"[{n}] Business case — {r.get('business','')} ({r.get('niche','')}), "
                 f"at {r.get('timestamp','?')} in \"{r.get('title','')}\". "
                 f"Situation: {r.get('situation','')} {char['name']}'s advice: {r.get('advice','')}")
+            sim = r.get("similarity")
             sources.append(Source(n=n, title=f"{r.get('business','')} — {r.get('title','')}",
                                   deep_link=r["deep_link"], timestamp=r.get("timestamp", ""),
-                                  similarity=round(r["similarity"], 4), video_id=r.get("video_id", ""),
+                                  similarity=(round(sim, 4) if sim is not None else None),
+                                  video_id=r.get("video_id", ""),
                                   snippet=_snip(f"{r.get('situation','')} {r.get('advice','')}")))
 
     context = "\n\n".join(blocks)
@@ -168,11 +217,16 @@ def _prepare(question, history, top_k, character):
     user_block = question
     if context:
         user_block = (
-            f"{question}\n\n---\nRelevant material from my videos to ground the answer "
-            f"(items marked 'Business case' are real businesses I advised). Use what's "
-            f"useful, in my voice. If they're asking about businesses or examples, weave "
-            f"the relevant ones in naturally as a person would — not as a numbered list or "
-            f"a data table, and without [1]/[2] brackets:\n{context}")
+            f"{question}\n\n---\nRelevant material from my videos to ground the answer. "
+            f"Items marked 'Business case' are real businesses I advised, each tagged with a "
+            f"category. Answer in my voice, and:\n"
+            f"- If they ask me to LIST businesses, GROUP them by category (e.g., Fitness & "
+            f"Gyms, SaaS & Software, Agencies) with the businesses under each.\n"
+            f"- If they ask about a specific category or business, cover the relevant ones: "
+            f"what it is, the situation, what I told them, and my honest read on how big the "
+            f"opportunity is (market size / scalability / margins — my judgment, never made-up "
+            f"numbers).\n"
+            f"No 'Situation:/Advice:' tables, no [1]/[2] brackets:\n{context}")
     messages = list(history or [])
     messages.append({"role": "user", "content": user_block})
     return system, messages, tier, sources, round(top_sim, 4)
