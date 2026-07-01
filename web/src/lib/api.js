@@ -95,13 +95,15 @@ async function authedGet(path) {
 }
 
 /** Owner-only: browse extracted business cases. */
-export function getBusinessCases({ q = '', niche = '', limit = 50, offset = 0 } = {}) {
-  const p = new URLSearchParams({ q, niche, limit: String(limit), offset: String(offset) })
+export function getBusinessCases({ q = '', niche = '', ownerOnly = true, limit = 50, offset = 0 } = {}) {
+  const p = new URLSearchParams({
+    q, niche, owner_only: String(ownerOnly), limit: String(limit), offset: String(offset),
+  })
   return authedGet(`/business-cases?${p.toString()}`)
 }
 
-export function getBusinessFacets() {
-  return authedGet('/business-cases/facets')
+export function getBusinessFacets(ownerOnly = true) {
+  return authedGet(`/business-cases/facets?owner_only=${ownerOnly}`)
 }
 
 /** Token usage + estimated cost for Voyage and Claude. */

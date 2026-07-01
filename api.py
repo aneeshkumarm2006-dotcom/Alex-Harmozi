@@ -160,11 +160,13 @@ def require_owner(user):
 
 
 @app.get("/business-cases")
-def business_cases(q: str = "", niche: str = "", limit: int = 50, offset: int = 0,
-                   user=Depends(require_user)):
+def business_cases(q: str = "", niche: str = "", owner_only: bool = True,
+                   limit: int = 50, offset: int = 0, user=Depends(require_user)):
     require_owner(user)
     sb = config.supabase_client()
     query = sb.table("business_cases").select("*", count="exact")
+    if owner_only:
+        query = query.eq("case_type", "owner_question")
     if niche:
         query = query.ilike("niche", f"%{niche}%")
     if q:
@@ -176,13 +178,27 @@ def business_cases(q: str = "", niche: str = "", limit: int = 50, offset: int = 
 
 
 @app.get("/business-cases/facets")
-def business_facets(user=Depends(require_user)):
+def business_facets(owner_only: bool = True, user=Depends(require_user)):
     require_owner(user)
+    # Compute niche counts in Python so we can scope to owner questions.
+    sb = config.supabase_client()
+    rows, start, counts = [], 0, {}
     try:
-        rows = config.supabase_client().rpc("business_niche_counts").execute().data or []
+        while True:
+            sel = sb.table("business_cases").select("niche,case_type").range(start, start + 999).execute().data or []
+            rows += sel
+            if len(sel) < 1000:
+                break
+            start += 1000
+        for r in rows:
+            if owner_only and r.get("case_type") != "owner_question":
+                continue
+            key = (r.get("niche") or "Other").strip() or "Other"
+            counts[key] = counts.get(key, 0) + 1
     except Exception:
-        rows = []
-    return {"niches": rows}
+        pass
+    niches = sorted(({"niche": k, "n": v} for k, v in counts.items()), key=lambda x: -x["n"])
+    return {"niches": niches}
 
 
 @app.post("/chat")
