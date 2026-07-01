@@ -63,9 +63,11 @@ const components = {
 }
 
 export default function Markdown({ children }) {
+  // Strip stray [1] / [1, 2] citation brackets — the Receipts cards show sources.
+  const clean = (children || '').replace(/\s?\[\d+(?:\s*,\s*\d+)*\]/g, '')
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-      {children || ''}
+      {clean}
     </ReactMarkdown>
   )
 }
