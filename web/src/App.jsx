@@ -18,7 +18,8 @@ export default function App() {
   })
   const [showCases, setShowCases] = useState(false)
   const reduce = useReducedMotion()
-  const isOwner = !!session && (session.user?.email || '').toLowerCase() === OWNER_EMAIL
+  // If no owner email is configured, treat everyone as owner (open access).
+  const isOwner = !!session && (!OWNER_EMAIL || (session.user?.email || '').toLowerCase() === OWNER_EMAIL)
 
   // Wrap the setter so the choice is persisted (and cleared on logout/back).
   function setCharacter(c) {
