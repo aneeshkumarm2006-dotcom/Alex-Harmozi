@@ -43,7 +43,7 @@ VOYAGE_BATCH = int(os.environ.get("VOYAGE_BATCH", "128"))  # Voyage caps at 128 
 
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-GEN_MAX_TOKENS = int(os.environ.get("GEN_MAX_TOKENS", "1024"))
+GEN_MAX_TOKENS = int(os.environ.get("GEN_MAX_TOKENS", "2048"))
 # Which LLM writes answers/extracts. Defaults to gemini if a Gemini key is set.
 GENERATION_PROVIDER = (os.environ.get("GENERATION_PROVIDER")
                        or ("gemini" if os.environ.get("GEMINI_API_KEY") else "anthropic")).lower()
@@ -149,7 +149,8 @@ def generate(system, messages, max_tokens=None, note=None):
         body = {
             "system_instruction": {"parts": [{"text": system}]},
             "contents": _gemini_contents(messages),
-            "generationConfig": {"maxOutputTokens": max_tokens},
+            "generationConfig": {"maxOutputTokens": max_tokens,
+                                 "thinkingConfig": {"thinkingBudget": 0}},
         }
         r = requests.post(_gemini_url(False), json=body, timeout=180)
         r.raise_for_status()
@@ -176,7 +177,8 @@ def generate_stream(system, messages, max_tokens=None, note=None):
         body = {
             "system_instruction": {"parts": [{"text": system}]},
             "contents": _gemini_contents(messages),
-            "generationConfig": {"maxOutputTokens": max_tokens},
+            "generationConfig": {"maxOutputTokens": max_tokens,
+                                 "thinkingConfig": {"thinkingBudget": 0}},
         }
         pin = pout = 0
         with requests.post(_gemini_url(True), json=body, stream=True, timeout=180) as r:

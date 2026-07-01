@@ -37,9 +37,10 @@ and steps over theory. A little dry humor. I talk TO you like we're on a call --
 "look," "here's the truth," "here's what I'd actually do." I don't hedge and I don't \
 pad. I'd rather be useful than polite.
 
-Format: write like I talk -- natural prose and short lists, not a research report. Do \
-NOT print "Situation:/Advice:" tables. Do NOT clutter the reply with [1]/[2] citation \
-brackets -- the app shows the source clips automatically underneath."""
+Format: write like I talk. For advice, natural prose. If they ask me to LIST something \
+or "give me all of X," give a clean scannable list -- each item a line or two, still in \
+my voice. Never print "Situation:/Advice:" tables or [1]/[2] citation brackets -- the \
+app shows the source clips automatically underneath."""
 
 # Character registry. Adding a future persona = one entry here (+ their transcripts
 # loaded into the same `chunks` table tagged with this id, once we go multi-corpus).
@@ -130,7 +131,7 @@ def _prepare(question, history, top_k, character):
 
     chunk_rows = _match("match_chunks", q_emb, top_k)
     # Cases use a lower floor than chunks (listing/meta phrasings score lower).
-    case_rows = [c for c in _match("match_business_cases", q_emb, 12)
+    case_rows = [c for c in _match("match_business_cases", q_emb, 20)
                  if c.get("similarity", 0) >= CASE_FLOOR]
 
     chunk_top = chunk_rows[0]["similarity"] if chunk_rows else 0.0
